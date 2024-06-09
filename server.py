@@ -61,6 +61,7 @@ async def handle_results(websocket: WebSocket, data: str):
     async def run_javascript_code() -> str:
         try:
             # Run the JavaScript code using Node.js
+            # TODO: REMOVE THIS ATROCITY AND PLACE THIS IN FRONT END
             process = subprocess.Popen(
                 ['node', '-e', """
                         const xrpl = require('xrpl')
