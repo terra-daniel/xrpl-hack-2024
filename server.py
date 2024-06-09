@@ -5,6 +5,7 @@ from xrpl_utils import create_escrow, finish_escrow
 import logging
 from typing import Dict, List
 from pydantic import BaseModel
+import subprocess
 
 logging.basicConfig(level=logging.INFO)
 
@@ -56,9 +57,69 @@ async def handle_results(websocket: WebSocket, data: str):
     if task_id not in tasks:
         tasks[task_id] = {'results': []}
     tasks[task_id]['results'].append(result['result'])
-    if validate_results(task_id):
-        await handle_escrow(task_id)
-        
+
+    async def run_javascript_code() -> str:
+        try:
+            # Run the JavaScript code using Node.js
+            process = subprocess.Popen(
+                ['node', '-e', """
+                        const xrpl = require('xrpl')
+                        const { Client, Wallet } = xrpl
+
+                        async function main () {
+                            const client = new Client('wss://s.altnet.rippletest.net:51233')
+                            await client.connect()
+
+                            const wallet = Wallet.fromSecret("sEd7QY4P5x4oHyXMX8eYvPp49fMERAX")
+
+                            // from the result of completing the task
+                            const info = {
+                            fulfillment: 'A022802037902991EBEF272A9BE1E600452AE4D1F8F480A722D32F507D99843EDCA15411',
+                            sequence: 1354084
+                            }
+
+                            // The person who submitted the job
+                            const rec = {
+                            wallet_address: 'rD1pL1Kkg35WLCyWFwN9xhdBizn3Mk16vC',
+                            condition: 'A0258020F7736861FADD4DB1B43493C2AD4AC21693E93F9C5BDB87C4A17AAECE38093564810120',
+                            }
+
+                            const prepared = await client.autofill({
+                                "TransactionType": "EscrowFinish",
+                                "Account": wallet.address,
+                                "Owner": rec.wallet_address,
+                                "OfferSequence": info.sequence,
+                                "Condition": rec.condition,
+                                "Fulfillment": info.fulfillment
+                            })
+
+                            console.log("bi")
+
+                            const signed = wallet.sign(prepared)
+                            const tx = await client.submitAndWait(signed.tx_blob)
+
+                            console.log(tx, tx.result)
+
+                            await client.disconnect()
+                        }
+
+                        main()
+                        """],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = process.communicate()
+
+            if process.returncode != 0:
+                raise Exception(f"JavaScript execution error: {stderr.decode('utf-8')}")
+
+            return stdout.decode('utf-8')
+        except Exception as e:
+            logging.error(f"Error running JavaScript code: {e}")
+            return str(e)
+    
+    await handle_escrow(task_id)
+
 
 # Function to validate results and handle escrow release
 async def handle_escrow(task_id):
