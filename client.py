@@ -13,11 +13,6 @@ def parse_args():
     parser.add_argument('--port', type=int, required=True, help='Server port')
     return parser.parse_args()
 
-async def log_periodically():
-    while True:
-        await asyncio.sleep(1)
-        logging.info('Checking for new tasks')
-
 async def main(host, port):
     # Initialize network client
     network_client = NetworkClient(host, port)
@@ -51,7 +46,6 @@ async def main(host, port):
     
     try:
         await asyncio.gather(
-            log_periodically(),
             receive_and_execute_tasks()
         )
     except KeyboardInterrupt:

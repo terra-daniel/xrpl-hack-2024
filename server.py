@@ -4,6 +4,7 @@ from xrpl.wallet import Wallet
 from xrpl_utils import create_escrow, finish_escrow
 import logging
 from typing import Dict, List
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -15,6 +16,9 @@ tasks = {}
 # List to store WebSocket clients and their wallet addresses
 clients: List[Dict[str, WebSocket]] = []
 
+class TaskRequest(BaseModel):
+    lua_code: str
+    escrow_sequence: int
 
 # WebSocket route for client connections
 @app.websocket("/ws")
@@ -35,15 +39,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Route for receiving tasks from users
 @app.post("/task")
-async def create_task(lua_code: str, escrow_sequence: int):
+async def create_task(request: TaskRequest):
     task_id = len(tasks) + 1
-    tasks[task_id] = {"lua_code": lua_code, "results": [], "escrow_sequence": escrow_sequence}
+    tasks[task_id] = {"lua_code": request.lua_code, "results": [], "escrow_sequence": request.escrow_sequence}
     
     # Distribute task to connected clients
     for client in clients:
-        await client['websocket'].send_text(json.dumps({"task_id": task_id, "lua_code": lua_code, "escrow_sequence": escrow_sequence}))
+        await client['websocket'].send_text(json.dumps({"task_id": task_id, "lua_code": request.lua_code, "escrow_sequence": request.escrow_sequence}))
     
-    return {"task_id": task_id, "escrow_sequence": escrow_sequence}
+    return {"task_id": task_id, "escrow_sequence": request.escrow_sequence}
 
 # Function to handle results from clients
 async def handle_results(websocket: WebSocket, data: str):
@@ -54,23 +58,16 @@ async def handle_results(websocket: WebSocket, data: str):
     tasks[task_id]['results'].append(result['result'])
     if validate_results(task_id):
         await handle_escrow(task_id)
+        
 
 # Function to validate results and handle escrow release
 async def handle_escrow(task_id):
-    if validate_results(task_id):
-        # Release the escrow using the stored wallet for the client
-        for client in clients:
-            client_wallet = client['wallet_details']
-            finish_escrow(client_wallet, client_wallet['public_key'], tasks[task_id]['escrow_sequence'])
-            logging.info(f"Escrow for task {task_id} released using wallet {client_wallet['public_key']}.")
-            # Notify clients about escrow release
-            await client['websocket'].send_text(json.dumps({'task_id': task_id, 'status': 'escrow_released'}))
+    # Release the escrow using the stored wallet for the client
+    for client in clients:
+        client_wallet = client['wallet_details']
+        finish_escrow(client_wallet, client_wallet['public_key'], tasks[task_id]['escrow_sequence'])
+        logging.info(f"Escrow for task {task_id} released using wallet {client_wallet['public_key']}.")
+        # Notify clients about escrow release
+        await client['websocket'].send_text(json.dumps({'task_id': task_id, 'status': 'escrow_released'}))
     else:
         logging.info(f"Validation failed for task {task_id}.")
-
-# Function to validate results
-def validate_results(task_id):
-    results = tasks[task_id]['results']
-    if len(results) > 1 and all(result == results[0] for result in results):
-        return True
-    return False
