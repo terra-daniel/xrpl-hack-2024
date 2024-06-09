@@ -1,1 +1,4 @@
 fastapi
+pymongo[srv]
+xrpl-py
+lupa
